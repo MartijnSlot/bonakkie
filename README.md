@@ -1,2 +1,2 @@
 # bonakkie
-Kotlin Vue Bonak emulator
+Bonak emulator
