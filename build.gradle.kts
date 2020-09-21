@@ -1,9 +1,6 @@
 plugins {
-    // Apply the java plugin to add support for Java
-    java
-
-    // Apply the application plugin to add support for building a CLI application.
     application
+    kotlin("jvm") version "1.4.10"
 }
 
 repositories {
@@ -13,14 +10,35 @@ repositories {
 }
 
 dependencies {
-    // This dependency is used by the application.
     implementation("com.google.guava:guava:29.0-jre")
-
-    // Use JUnit test framework
-    testImplementation("junit:junit:4.13")
+    implementation(kotlin("stdlib"))
+    testImplementation("junit:junit:${Deps.junitVersion}")
 }
 
 application {
-    // Define the main class for the application.
-    mainClassName = "bonakkie.App"
+    // Main class definition.
+    mainClassName = "Bonakkie"
+}
+
+tasks {
+
+    compileKotlin {
+        kotlinOptions {
+            jvmTarget = "1.8"
+        }
+    }
+
+    compileTestKotlin {
+        kotlinOptions {
+            jvmTarget = "1.8"
+        }
+    }
+
+    wrapper {
+        gradleVersion = "6.10"
+    }
+}
+
+object Deps {
+    const val junitVersion = "4.13"
 }
