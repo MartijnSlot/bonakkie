@@ -4,15 +4,16 @@ plugins {
 }
 
 repositories {
-    // Use jcenter for resolving dependencies.
-    // You can declare any Maven/Ivy/file repository here.
     jcenter()
+    mavenCentral()
 }
 
 dependencies {
     implementation("com.google.guava:guava:29.0-jre")
     implementation(kotlin("stdlib"))
-    testImplementation("junit:junit:${Deps.junitVersion}")
+    implementation("io.dropwizard:dropwizard-core:${Deps.dropwizardVersion}")
+
+    testImplementation("org.junit.jupiter:junit-jupiter-api:${Deps.junitVersion}")
 }
 
 application {
@@ -24,13 +25,13 @@ tasks {
 
     compileKotlin {
         kotlinOptions {
-            jvmTarget = "1.8"
+            jvmTarget = "1.14"
         }
     }
 
     compileTestKotlin {
         kotlinOptions {
-            jvmTarget = "1.8"
+            jvmTarget = "1.14"
         }
     }
 
@@ -40,5 +41,7 @@ tasks {
 }
 
 object Deps {
-    const val junitVersion = "4.13"
+    const val junitVersion = "5.7.0"
+    const val dropwizardVersion = "2.0.13"
+
 }
