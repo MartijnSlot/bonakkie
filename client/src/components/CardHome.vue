@@ -1,5 +1,7 @@
 <template>
-  <div id="container"></div>
+  <div id="container">
+    <h1>Bonakkie!</h1>
+  </div>
 </template>
 
 <script lang="ts">
@@ -7,7 +9,7 @@ import Component from 'vue-class-component';
 import Vue from 'vue';
 
 @Component
-export default class Index extends Vue {
+export default class CardHome extends Vue {
 }
 </script>
 
@@ -16,14 +18,17 @@ export default class Index extends Vue {
 h3 {
   margin: 40px 0 0;
 }
+
 ul {
   list-style-type: none;
   padding: 0;
 }
+
 li {
   display: inline-block;
   margin: 0 10px;
 }
+
 a {
   color: #42b983;
 }
