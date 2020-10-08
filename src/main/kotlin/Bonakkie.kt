@@ -8,8 +8,12 @@ internal class Bonakkie : Application<BonakkieConfiguration>() {
     val LOGGER: Logger = LoggerFactory.getLogger(Bonakkie::class.java)
 
     @Throws(Exception::class)
-    override fun run(configuration: BonakkieConfiguration, environment: Environment?) {
-        LOGGER.info("Application name: {}", configuration.appName)
+    override fun run(configuration: BonakkieConfiguration, environment: Environment) {
+        try {
+            println("Application name: ${configuration.appName}")
+        } catch (e: Exception) {
+            LOGGER.info("Application name: {}", configuration.appName)
+        }
     }
 
     companion object {

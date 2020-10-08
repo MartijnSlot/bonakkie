@@ -4,5 +4,5 @@ import io.dropwizard.Configuration
 class BonakkieConfiguration : Configuration() {
     @get:JsonProperty
     @set:JsonProperty
-    var appName: String = ""
+    lateinit var appName: String
 }

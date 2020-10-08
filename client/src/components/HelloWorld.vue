@@ -3,11 +3,12 @@
 </template>
 
 <script lang="ts">
+import Deck from 'deck-of-cards';
 // Instantiate a deck with all cards
-let deck = Deck();
+const deck = Deck();
 
 // display it in a html container
-let $container = document.getElementById('container');
+const $container = document.getElementById('container');
 deck.mount($container);
 </script>
 

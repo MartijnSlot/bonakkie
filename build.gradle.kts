@@ -21,18 +21,24 @@ application {
     mainClassName = "Bonakkie"
 }
 
+val configYML = "./config/config.yml"
+
 tasks {
 
     compileKotlin {
         kotlinOptions {
-            jvmTarget = "1.14"
+            jvmTarget = "14"
         }
     }
 
     compileTestKotlin {
         kotlinOptions {
-            jvmTarget = "1.14"
+            jvmTarget = "14"
         }
+    }
+
+    withType<JavaExec> {
+            args("server", configYML)
     }
 
     wrapper {
