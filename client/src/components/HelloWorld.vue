@@ -3,13 +3,12 @@
 </template>
 
 <script lang="ts">
-import Deck from 'deck-of-cards';
-// Instantiate a deck with all cards
-const deck = Deck();
+import Component from 'vue-class-component';
+import Vue from 'vue';
 
-// display it in a html container
-const $container = document.getElementById('container');
-deck.mount($container);
+@Component
+export default class Index extends Vue {
+}
 </script>
 
 <!-- Add "scoped" attribute to limit CSS to this component only -->
