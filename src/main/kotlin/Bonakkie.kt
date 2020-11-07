@@ -1,5 +1,7 @@
 import io.dropwizard.Application
 import io.dropwizard.setup.Environment
+import model.Game
+import model.Player
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
 
@@ -11,6 +13,8 @@ internal class Bonakkie : Application<BonakkieConfiguration>() {
     override fun run(configuration: BonakkieConfiguration, environment: Environment) {
         try {
             println("Application name: ${configuration.appName}")
+            val game = Game(mutableListOf(Player("martijn")))
+            game.start()
         } catch (e: Exception) {
             LOGGER.info("Application name: {}", configuration.appName)
         }
