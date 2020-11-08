@@ -2,12 +2,10 @@ package resource
 
 import model.Card
 import model.Deck
-import model.Game
 import model.Player
 import view.GameView
-import javax.annotation.PostConstruct
+import javax.ws.rs.FormParam
 import javax.ws.rs.GET
-import javax.ws.rs.POST
 import javax.ws.rs.Path
 import javax.ws.rs.core.Response
 
@@ -15,8 +13,8 @@ import javax.ws.rs.core.Response
 class GameResource {
 
     @GET
-    @Path("/")
-    fun startGame(playerNames: Array<String>) : Response {
+    @Path("/start")
+    fun startGame(@FormParam("players") playerNames: Array<String>) : Response {
         val playerList: MutableList<Player> = mutableListOf()
         playerNames.forEach { player ->
             playerList.add(Player(player))
