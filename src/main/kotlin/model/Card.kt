@@ -8,5 +8,5 @@ sealed class Card {
 }
 
 enum class Type {
-    EIGHT, NINE, TEN, JACK, QUEEN, KING, ACE
+    SEVEN, EIGHT, NINE, TEN, JACK, QUEEN, KING, ACE
 }

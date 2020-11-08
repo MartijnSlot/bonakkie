@@ -1,1 +1,6 @@
 appName: Bonakkie
+
+server:
+  applicationConnectors:
+    - type: http
+      port: 6969

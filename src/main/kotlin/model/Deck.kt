@@ -1,15 +1,16 @@
 package model
 
 class Deck {
-    var cards = mutableListOf<Card>()
+    var initial: MutableList<Card> = mutableListOf()
+    var afterDeal: MutableList<Card> = mutableListOf()
 
     init {
         for (type in Type.values()) {
-            cards.add(Card.Diamonds(type))
-            cards.add(Card.Hearts(type))
-            cards.add(Card.Clubs(type))
-            cards.add(Card.Spades(type))
+            initial.add(Card.Diamonds(type))
+            initial.add(Card.Hearts(type))
+            initial.add(Card.Clubs(type))
+            initial.add(Card.Spades(type))
         }
-        cards.shuffle()
+        initial.shuffle()
     }
 }

@@ -1,6 +1,6 @@
 package model
 
-class Game(val players: MutableList<Player>) {
+class Game(private val players: MutableList<Player>) {
 
     fun start() {
         val deck = Deck()
@@ -8,17 +8,13 @@ class Game(val players: MutableList<Player>) {
     }
 
     private fun deal(players: MutableList<Player>, deck: Deck) {
+        val handSize = if (players.size < 6) 6 else 5
+        val chunkedDeck = deck.initial.chunked(handSize).toMutableList()
         players.forEach { player ->
-            for (i: Int in 0 until deck.cards.size) {
-                player.cardsInHand = Player.Hand(deck.cards.subList(i, i+5))
-                deck.cards.removeAt(i)
-                deck.cards.removeAt(i+1)
-                deck.cards.removeAt(i+2)
-                deck.cards.removeAt(i+3)
-                deck.cards.removeAt(i+4)
-                deck.cards.removeAt(i+5)
-            }
-            println(player.cardsInHand)
+            player.cardsInHand = Player.Hand(chunkedDeck[0].toMutableList())
+            chunkedDeck.removeAt(0)
+            println("PLAYER ${player.name} has hand: ${player.cardsInHand}")
         }
+        deck.afterDeal = chunkedDeck.flatten().toMutableList()
     }
 }
