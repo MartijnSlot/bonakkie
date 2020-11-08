@@ -13,10 +13,8 @@ internal class Bonakkie : Application<BonakkieConfiguration>() {
     override fun run(configuration: BonakkieConfiguration, environment: Environment) {
         try {
             println("Application name: ${configuration.appName}")
-            val game = Game(mutableListOf(Player("martijn"), Player("rosemarie")))
-            game.start()
         } catch (e: Exception) {
-            LOGGER.info("Application name: {}", configuration.appName)
+            LOGGER.info("Application njame: {}", configuration.appName)
         }
     }
 
