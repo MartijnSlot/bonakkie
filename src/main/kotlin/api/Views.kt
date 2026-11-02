@@ -17,7 +17,9 @@ import model.Suit
 import roem.RoemCombinationType
 import roem.RoemResult
 
-data class StartAuctionRequest(val players: List<String>, val dealer: String)
+data class StartRoundRequest(val players: List<String>, val dealer: String)
+
+data class DiscardRequest(val player: String, val cards: List<Card>)
 
 data class ActionRequest(val player: String, val type: ActionType, val amount: Int? = null)
 

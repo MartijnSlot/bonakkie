@@ -1,6 +1,6 @@
-import api.AuctionResource
-import api.AuctionStore
 import api.RoemResource
+import api.RoundResource
+import api.RoundStore
 import api.RuleViolationMapper
 import com.fasterxml.jackson.module.kotlin.kotlinModule
 import io.dropwizard.core.Application
@@ -19,7 +19,7 @@ internal class Bonakkie : Application<BonakkieConfiguration>() {
 
     override fun run(configuration: BonakkieConfiguration, environment: Environment) {
         LOGGER.info("Application name: {}", configuration.appName)
-        environment.jersey().register(AuctionResource(AuctionStore()))
+        environment.jersey().register(RoundResource(RoundStore()))
         environment.jersey().register(RoemResource())
         environment.jersey().register(RuleViolationMapper())
     }
