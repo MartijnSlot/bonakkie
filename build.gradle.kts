@@ -1,40 +1,39 @@
 plugins {
     application
-    kotlin("jvm") version "1.4.10"
+    kotlin("jvm") version "2.4.21"
 }
 
 repositories {
-    jcenter()
     mavenCentral()
 }
 
 dependencies {
-    implementation("com.google.guava:guava:29.0-jre")
+    implementation(platform("io.dropwizard:dropwizard-dependencies:${Deps.dropwizardVersion}"))
     implementation(kotlin("stdlib"))
     implementation("io.dropwizard:dropwizard-core:${Deps.dropwizardVersion}")
+    implementation("com.fasterxml.jackson.module:jackson-module-kotlin")
 
-    testImplementation("org.junit.jupiter:junit-jupiter-api:${Deps.junitVersion}")
+    testImplementation(platform("org.junit:junit-bom:${Deps.junitVersion}"))
+    testImplementation("org.junit.jupiter:junit-jupiter")
+    testImplementation("io.dropwizard:dropwizard-testing:${Deps.dropwizardVersion}")
+    testRuntimeOnly("org.junit.platform:junit-platform-launcher")
+}
+
+kotlin {
+    jvmToolchain(25)
 }
 
 application {
     // Main class definition.
-    mainClassName = "Bonakkie"
+    mainClass.set("Bonakkie")
 }
 
 val configYML = "./config/config.yml"
 
 tasks {
 
-    compileKotlin {
-        kotlinOptions {
-            jvmTarget = "14"
-        }
-    }
-
-    compileTestKotlin {
-        kotlinOptions {
-            jvmTarget = "14"
-        }
+    test {
+        useJUnitPlatform()
     }
 
     withType<JavaExec> {
@@ -42,12 +41,12 @@ tasks {
     }
 
     wrapper {
-        gradleVersion = "6.10"
+        gradleVersion = "9.8.2"
     }
 }
 
 object Deps {
-    const val junitVersion = "5.7.0"
-    const val dropwizardVersion = "2.0.13"
+    const val junitVersion = "6.1.3"
+    const val dropwizardVersion = "5.0.2"
 
 }
