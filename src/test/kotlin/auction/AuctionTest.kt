@@ -132,17 +132,16 @@ class AuctionTest {
         }
 
         @Test
-        fun `all pass on the opening circuit is an explicit unresolved state, not a redeal`() {
+        fun `all pass on the opening circuit ends the auction as all passed, not as all rond`() {
             val auction = start().play(PASS, PASS, PASS, PASS)
-            assertEquals(AuctionStatus.UNRESOLVED_ALL_PASSED, auction.status)
+            assertEquals(AuctionStatus.ALL_PASSED, auction.status)
             assertNull(auction.contract)
-            assertTrue(auction.status.message.contains("do not define"))
         }
 
         @Test
-        fun `rond then all pass without a bid is also unresolved`() {
+        fun `rond then all pass without a bid is all passed`() {
             val auction = start().play(ROND, PASS, PASS, PASS, PASS)
-            assertEquals(AuctionStatus.UNRESOLVED_ALL_PASSED, auction.status)
+            assertEquals(AuctionStatus.ALL_PASSED, auction.status)
         }
 
         @Test
@@ -296,7 +295,21 @@ class AuctionTest {
         @Test
         fun `bonak roem must be positive, achievable and at most 100`() {
             val auction = start().play(BONAK)
-            listOf(0, -20, 30, 45, 110).forEach { assertFalse(auction.isLegal(bonakWithRoem(it)), "$it should be illegal") }
+            listOf(0, -20, 30, 45, 80, 90, 110).forEach { assertFalse(auction.isLegal(bonakWithRoem(it)), "$it should be illegal") }
+        }
+
+        @Test
+        fun `equal 100 roem never overbids, whatever combination it would come from`() {
+            // Bids only carry an amount: a six-card sequence (100) cannot beat a five-card sequence (100).
+            val auction = start().play(BONAK, bonakWithRoem(100))
+            assertFalse(auction.isLegal(bonakWithRoem(100)))
+            assertFalse(auction.isLegal(bonakWithRoem(110)))
+            assertEquals(setOf(ActionType.PASS), auction.legalActions().map { it.type }.toSet())
+        }
+
+        @Test
+        fun `plain bonak is beaten by bonak with roem`() {
+            assertTrue(start().play(BONAK).isLegal(bonakWithRoem(20)))
         }
 
         @Test
@@ -354,7 +367,7 @@ class AuctionTest {
 
             val overBonak = start().play(BONAK, bonakWithRoem(60)).legalActions().associateBy { it.type }
             assertEquals(setOf(ActionType.PASS, ActionType.BID_BONAK_WITH_ROEM), overBonak.keys)
-            assertEquals(listOf(70, 80, 90, 100), overBonak.getValue(ActionType.BID_BONAK_WITH_ROEM).amounts)
+            assertEquals(listOf(70, 100), overBonak.getValue(ActionType.BID_BONAK_WITH_ROEM).amounts)
         }
     }
 }

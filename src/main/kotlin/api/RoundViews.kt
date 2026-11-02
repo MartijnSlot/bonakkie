@@ -4,17 +4,23 @@ import auction.BonakContract
 import auction.PointsRequirements
 import model.Card
 import model.Suit
+import round.ContractFailure
 import round.Discarded
+import round.FailureReason
 import round.Round
 import round.RoundPhase
 import round.StokFaceDown
 import round.StokFaceUp
 import round.Unused
 
-const val TRUMP_NOTE =
-    "Trump selection is not specified yet, so no trump suit is set. Final roem is given for every possible trump suit."
-
 data class ExchangeView(val order: List<String>, val completed: List<String>, val currentPlayer: String?)
+
+/** Public: the failure reason and the roem committed in (public) bidding. The actual roem stays with the declarer. */
+data class FailureView(val reason: FailureReason, val declaredRoem: Int, val message: String) {
+    companion object {
+        fun of(failure: ContractFailure) = FailureView(failure.reason, failure.declaredRoem, failure.message)
+    }
+}
 
 /**
  * What every player may know. Card identities here are limited to the original face-up stok card,
@@ -22,6 +28,8 @@ data class ExchangeView(val order: List<String>, val completed: List<String>, va
  */
 data class RoundView(
     val dealNumber: Int,
+    /** Send this back with every bid, discard and trump choice. */
+    val version: Long,
     val redealReason: String?,
     val players: List<String>,
     val dealer: String,
@@ -35,12 +43,16 @@ data class RoundView(
     val discardedCards: Int,
     val auction: AuctionView,
     val exchange: ExchangeView?,
+    /** The declarer who must choose trumps now, if any. */
+    val trumpChooser: String?,
     val trumpSuit: Suit?,
-    val trumpNote: String,
+    val playsWithoutTrumps: Boolean,
+    val failure: FailureView?,
 ) {
     companion object {
         fun of(round: Round) = RoundView(
             dealNumber = round.dealNumber,
+            version = round.version,
             redealReason = round.redealReason,
             players = round.players,
             dealer = round.dealer,
@@ -56,19 +68,23 @@ data class RoundView(
             exchange = round.exchangeOrder.takeIf { it.isNotEmpty() }?.let {
                 ExchangeView(it, it.take(round.exchangesCompleted), round.currentExchanger)
             },
-            trumpSuit = null,
-            trumpNote = TRUMP_NOTE,
+            trumpChooser = round.trumpChooser,
+            trumpSuit = round.trump,
+            playsWithoutTrumps = round.playsWithoutTrumps,
+            failure = round.failure?.let(FailureView::of),
         )
     }
 }
 
 data class FinalRoemView(
     val hand: List<Card>,
-    val roemByTrump: Map<Suit, RoemResultView>,
-    /** Bonak with roem: the amount committed during bidding, kept next to the actual final roem. */
+    val trump: Suit,
+    val roem: RoemResultView,
+    /** Bonak with roem: the minimum committed during bidding, kept next to the actual final roem. */
     val committedBonakRoem: Int?,
-    /** Points contracts: trick requirements for each possible trump suit. */
-    val pointsRequirementsByTrump: Map<Suit, PointsRequirements>?,
+    val bonakCommitmentSatisfied: Boolean?,
+    /** Points contracts: the trick requirements once the final roem is determined. */
+    val pointsRequirements: PointsRequirements?,
 )
 
 /** One player's view: the public round plus their own cards. Never contains another player's hidden cards. */
@@ -78,6 +94,8 @@ data class PlayerView(
     val hand: List<Card>,
     val receivedFromStok: List<Card>?,
     val discarded: List<Card>?,
+    /** True only for the declarer who must choose trumps now. */
+    val mayChooseTrumps: Boolean,
     val finalRoem: FinalRoemView?,
 ) {
     companion object {
@@ -87,12 +105,15 @@ data class PlayerView(
             hand = round.hand(player),
             receivedFromStok = round.received[player],
             discarded = round.discards[player],
-            finalRoem = round.finalRoem[player]?.let { roem ->
+            mayChooseTrumps = round.trumpChooser == player,
+            finalRoem = round.finalRoem?.takeIf { it.player == player }?.let { roem ->
                 FinalRoemView(
-                    hand = roem.hand.sortedWith(compareBy({ it.suit }, { it.rank })),
-                    roemByTrump = roem.byTrump.mapValues { RoemResultView.of(it.value) },
+                    hand = roem.hand,
+                    trump = roem.trump,
+                    roem = RoemResultView.of(roem.roem),
                     committedBonakRoem = (round.auction.contract as? BonakContract)?.declaredRoem,
-                    pointsRequirementsByTrump = round.pointsRequirements(),
+                    bonakCommitmentSatisfied = round.bonakCommitmentSatisfied(),
+                    pointsRequirements = round.pointsRequirements(),
                 )
             },
         )

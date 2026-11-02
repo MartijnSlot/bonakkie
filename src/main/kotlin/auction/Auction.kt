@@ -15,10 +15,8 @@ data class BonakBid(val bidder: String, val roem: Int?) : StandingBid
 enum class AuctionStatus(val message: String) {
     IN_PROGRESS("Bidding is in progress."),
     CONTRACT_FINALIZED("The bidding contract is final."),
-    REDEAL_REQUIRED("Every player said Rond on the opening circuit: the cards must be redealt."),
-    UNRESOLVED_ALL_PASSED(
-        "Every player passed without a bid. The rules do not define an outcome for this; start a fresh auction."
-    ),
+    REDEAL_REQUIRED("Every player said Rond on the opening circuit: the same dealer deals again."),
+    ALL_PASSED("Every player passed without a bid: the next player clockwise deals again."),
 }
 
 /**
@@ -80,7 +78,7 @@ class Auction private constructor(
         val remaining = players.filter { it !in passed }
         val (status, contract) = when {
             rondAllowed && history.size == players.size -> AuctionStatus.REDEAL_REQUIRED to null
-            bid == null && remaining.isEmpty() -> AuctionStatus.UNRESOLVED_ALL_PASSED to null
+            bid == null && remaining.isEmpty() -> AuctionStatus.ALL_PASSED to null
             bid is PointsBid && remaining == listOf(bid.bidder) ->
                 AuctionStatus.CONTRACT_FINALIZED to PointsContract(bid.bidder, bid.amount)
             bid is BonakBid && remaining == listOf(bid.bidder) ->

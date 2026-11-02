@@ -13,3 +13,14 @@ class RuleViolationMapper : ExceptionMapper<RuleViolation> {
             .entity(ErrorMessage(Response.Status.BAD_REQUEST.statusCode, exception.message))
             .build()
 }
+
+/** A request based on an outdated round version, e.g. a repeated submission. */
+class StaleRequest(message: String) : RuntimeException(message)
+
+class StaleRequestMapper : ExceptionMapper<StaleRequest> {
+    override fun toResponse(exception: StaleRequest): Response =
+        Response.status(Response.Status.CONFLICT)
+            .type(MediaType.APPLICATION_JSON_TYPE)
+            .entity(ErrorMessage(Response.Status.CONFLICT.statusCode, exception.message))
+            .build()
+}

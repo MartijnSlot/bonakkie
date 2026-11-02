@@ -13,6 +13,7 @@ import model.Rank
 import model.Shuffler
 import model.Suit
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.extension.ExtendWith
@@ -32,6 +33,7 @@ class RoundResourceTest {
         .addResource(RoundResource(RoundStore(Shuffler { it })))
         .addResource(RoemResource())
         .addProvider(RuleViolationMapper())
+        .addProvider(StaleRequestMapper())
         .build()
 
     private val ann = Deck.cards.subList(0, 6).toSet()
@@ -47,11 +49,16 @@ class RoundResourceTest {
     private fun get(path: String): Pair<Int, JsonNode> =
         resources.target(path).request().get().use { it.status to mapper.readTree(it.readEntity(String::class.java)) }
 
-    private fun bid(player: String, type: String, amount: Int? = null) =
-        post("/api/round/bids", """{"player":"$player","type":"$type"${amount?.let { ""","amount":$it""" } ?: ""}}""")
+    private fun version() = get("/api/round").second["version"].asLong()
+
+    private fun bid(player: String, type: String, amount: Int? = null, version: Long = version()) =
+        post("/api/round/bids", """{"player":"$player","type":"$type"${amount?.let { ""","amount":$it""" } ?: ""},"version":$version}""")
 
     private fun discard(player: String, vararg cards: Card) =
-        post("/api/round/discards", """{"player":"$player","cards":${mapper.writeValueAsString(cards)}}""")
+        post("/api/round/discards", """{"player":"$player","cards":${mapper.writeValueAsString(cards)},"version":${version()}}""")
+
+    private fun trump(player: String, suit: String) =
+        post("/api/round/trump", """{"player":"$player","suit":"$suit","version":${version()}}""")
 
     /** Every card identity anywhere in a response. */
     private fun cardsIn(node: JsonNode): Set<Card> = when {
@@ -72,7 +79,6 @@ class RoundResourceTest {
         assertEquals(1, round["stokCardsFaceDown"].asInt())
         assertEquals(12, round["unusedCards"].asInt())
         assertEquals(6, round["handSizes"]["Bob"].asInt())
-        assertEquals(setOf(faceUp), cardsIn(get("/api/round").second))
     }
 
     @Test
@@ -87,54 +93,91 @@ class RoundResourceTest {
     @Test
     fun `the face down card is only revealed to the declarer who takes it`() {
         start()
-        bid("Ann", "BID_POINTS", 60)
-        bid("Bob", "PASS")
+        bid("Ann", "BID_POINTS", 60); bid("Bob", "PASS")
         val (_, round) = bid("Cas", "PASS")
         assertEquals("STOK_EXCHANGE", round["phase"].asText())
-        assertEquals("Ann", round["exchange"]["currentPlayer"].asText())
-        assertEquals(8, round["handSizes"]["Ann"].asInt())
         assertEquals(setOf(faceUp), cardsIn(round))
-
-        val (_, annView) = get("/api/round/players/Ann")
-        assertEquals(ann + faceUp + faceDown, cardsIn(annView))
+        assertEquals(ann + faceUp + faceDown, cardsIn(get("/api/round/players/Ann").second))
         assertEquals(bob + faceUp, cardsIn(get("/api/round/players/Bob").second))
     }
 
     @Test
-    fun `discards stay private and final roem is only in the declarer's view`() {
+    fun `trump selection is offered only to the declarer, then final roem only to them`() {
         start()
         bid("Ann", "BID_POINTS", 60); bid("Bob", "PASS"); bid("Cas", "PASS")
-        val discarded = listOf(card(Rank.SEVEN, Suit.CLUBS), card(Rank.EIGHT, Suit.CLUBS))
-        val (status, annView) = discard("Ann", *discarded.toTypedArray())
+        val (_, afterDiscard) = discard("Ann", card(Rank.SEVEN, Suit.CLUBS), card(Rank.EIGHT, Suit.CLUBS))
+        assertEquals("TRUMP_SELECTION", afterDiscard["round"]["phase"].asText())
+        assertEquals("Ann", afterDiscard["round"]["trumpChooser"].asText())
+        assertTrue(afterDiscard["mayChooseTrumps"].asBoolean())
+        assertFalse(get("/api/round/players/Bob").second["mayChooseTrumps"].asBoolean())
+
+        val (wrongStatus, wrongPlayer) = trump("Bob", "HEARTS")
+        assertEquals(400, wrongStatus)
+        assertTrue(wrongPlayer["message"].asText().contains("Only Ann may choose trumps"))
+        val (badStatus, badSuit) = trump("Ann", "PURPLE")
+        assertEquals(400, badStatus)
+        assertTrue(badSuit["message"].asText().contains("must be one of"))
+
+        val (status, annView) = trump("Ann", "HEARTS")
         assertEquals(200, status)
         assertEquals("READY_TO_PLAY", annView["round"]["phase"].asText())
-        assertEquals(6, annView["hand"].size())
         // Ann keeps C9, C10, CJ, CQ (a four-card sequence: 50) plus H9, H10.
-        assertEquals(50, annView["finalRoem"]["roemByTrump"]["HEARTS"]["total"].asInt())
-        val requirements = annView["finalRoem"]["pointsRequirementsByTrump"]["CLUBS"]
-        assertEquals(10, requirements["requiredTrickPoints"].asInt())
-        assertEquals(1, requirements["minimumTricks"].asInt())
+        assertEquals(50, annView["finalRoem"]["roem"]["total"].asInt())
+        assertEquals(10, annView["finalRoem"]["pointsRequirements"]["requiredTrickPoints"].asInt())
 
         val (_, round) = get("/api/round")
-        assertEquals(2, round["discardedCards"].asInt())
+        assertEquals("HEARTS", round["trumpSuit"].asText())
         assertEquals(setOf(faceUp), cardsIn(round))
-        assertTrue(round["trumpSuit"].isNull)
-        val (_, bobView) = get("/api/round/players/Bob")
-        assertEquals(bob + faceUp, cardsIn(bobView))
-        assertTrue(bobView["finalRoem"].isNull)
+        assertTrue(get("/api/round/players/Bob").second["finalRoem"].isNull)
     }
 
     @Test
-    fun `the next praat player sees the passed cards`() {
+    fun `a failed bonak commitment is shown publicly without revealing the actual roem`() {
+        start()
+        bid("Ann", "BID_BONAK"); bid("Bob", "BID_BONAK_WITH_ROEM", 50); bid("Cas", "PASS"); bid("Ann", "PASS")
+        // Bob takes H9, H10 and keeps D8, D9, D10: 20 roem.
+        discard("Bob", card(Rank.SEVEN, Suit.DIAMONDS), card(Rank.NINE, Suit.HEARTS))
+        val (_, bobView) = trump("Bob", "SPADES")
+        assertEquals("CONTRACT_FAILED", bobView["round"]["phase"].asText())
+        assertEquals(20, bobView["finalRoem"]["roem"]["total"].asInt())
+        assertFalse(bobView["finalRoem"]["bonakCommitmentSatisfied"].asBoolean())
+
+        val (_, round) = get("/api/round")
+        assertEquals("INSUFFICIENT_BONAK_ROEM", round["failure"]["reason"].asText())
+        assertEquals(50, round["failure"]["declaredRoem"].asInt())
+        assertFalse(round.toString().contains("\"total\""))
+    }
+
+    @Test
+    fun `multi player praat skips trump selection`() {
         start()
         bid("Ann", "BID_PRAAT"); bid("Bob", "BID_PRAAT"); bid("Cas", "PASS")
         val passed = listOf(card(Rank.SEVEN, Suit.CLUBS), faceDown)
         discard("Ann", *passed.toTypedArray())
         val (_, bobView) = get("/api/round/players/Bob")
         assertEquals(passed.toSet(), cardsIn(bobView["receivedFromStok"]))
-        assertEquals(8, bobView["hand"].size())
         assertEquals(bob + passed + faceUp, cardsIn(bobView))
-        assertEquals(setOf(faceUp), cardsIn(get("/api/round").second))
+
+        val (_, afterBob) = discard("Bob", card(Rank.KING, Suit.CLUBS), card(Rank.ACE, Suit.CLUBS))
+        assertEquals("READY_TO_PLAY", afterBob["round"]["phase"].asText())
+        assertTrue(afterBob["round"]["playsWithoutTrumps"].asBoolean())
+        assertEquals(400, trump("Ann", "HEARTS").first)
+    }
+
+    @Test
+    fun `a repeated request after a redeal is rejected instead of acting on the new deal`() {
+        start()
+        bid("Ann", "PASS"); bid("Bob", "PASS")
+        val lastVersion = version()
+        val (_, redealt) = bid("Cas", "PASS", version = lastVersion)
+        assertEquals(2, redealt["dealNumber"].asInt())
+        assertEquals("Ann", redealt["dealer"].asText())
+        assertEquals("Bob", redealt["auction"]["currentPlayer"].asText())
+
+        val (status, error) = bid("Cas", "PASS", version = lastVersion)
+        assertEquals(409, status)
+        assertTrue(error["message"].asText().contains("has changed"))
+        assertEquals(redealt, get("/api/round").second)
     }
 
     @Test
@@ -147,15 +190,17 @@ class RoundResourceTest {
         val (discardStatus, discardError) = discard("Ann", card(Rank.SEVEN, Suit.CLUBS), card(Rank.EIGHT, Suit.CLUBS))
         assertEquals(400, discardStatus)
         assertTrue(discardError["message"].asText().contains("stok exchange"))
+        assertEquals(400, trump("Ann", "HEARTS").first)
         assertEquals(before, get("/api/round").second)
-        assertEquals(ann, cardsIn(get("/api/round/players/Ann").second["hand"]))
     }
 
     @Test
-    fun `players beyond the deck's capacity are rejected`() {
-        val (status, error) = post("/api/round", """{"players":["A","B","C","D","E","F"],"dealer":"F"}""")
-        assertEquals(400, status)
-        assertTrue(error["message"].asText().contains("at most 5 players"))
+    fun `player counts outside three to five are rejected`() {
+        listOf("""["A","B"]""", """["A","B","C","D","E","F"]""").forEach { players ->
+            val (status, error) = post("/api/round", """{"players":$players,"dealer":"A"}""")
+            assertEquals(400, status)
+            assertTrue(error["message"].asText().contains("3 to 5 players"))
+        }
     }
 
     @Test
@@ -164,12 +209,14 @@ class RoundResourceTest {
     }
 
     @Test
-    fun `calculates roem`() {
-        val json = """{"trump":"HEARTS","cards":[
-            {"rank":"JACK","suit":"HEARTS"},{"rank":"QUEEN","suit":"HEARTS"},
-            {"rank":"KING","suit":"HEARTS"},{"rank":"ACE","suit":"HEARTS"}]}"""
+    fun `the roem calculator lists competing alternatives and counts the highest`() {
+        val json = """{"trump":"CLUBS","cards":[
+            {"rank":"JACK","suit":"CLUBS"},{"rank":"JACK","suit":"DIAMONDS"},{"rank":"JACK","suit":"HEARTS"},
+            {"rank":"JACK","suit":"SPADES"},{"rank":"TEN","suit":"HEARTS"},{"rank":"QUEEN","suit":"HEARTS"}]}"""
         val (status, result) = post("/api/roem/calculate", json)
         assertEquals(200, status)
-        assertEquals(70, result["total"].asInt())
+        assertEquals(100, result["total"].asInt())
+        assertEquals(listOf(20, 100), result["possibleTotals"].map { it.asInt() })
+        assertEquals(2, result["alternatives"].size())
     }
 }

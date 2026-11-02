@@ -2,6 +2,7 @@ import api.RoemResource
 import api.RoundResource
 import api.RoundStore
 import api.RuleViolationMapper
+import api.StaleRequestMapper
 import com.fasterxml.jackson.module.kotlin.kotlinModule
 import io.dropwizard.core.Application
 import io.dropwizard.core.setup.Bootstrap
@@ -22,6 +23,7 @@ internal class Bonakkie : Application<BonakkieConfiguration>() {
         environment.jersey().register(RoundResource(RoundStore()))
         environment.jersey().register(RoemResource())
         environment.jersey().register(RuleViolationMapper())
+        environment.jersey().register(StaleRequestMapper())
     }
 
     companion object {

@@ -19,9 +19,16 @@ import roem.RoemResult
 
 data class StartRoundRequest(val players: List<String>, val dealer: String)
 
-data class DiscardRequest(val player: String, val cards: List<Card>)
+/**
+ * Requests that change a round carry the [RoundView.version] they were based on. A request against an older version
+ * (for example a repeated submission after a redeal) is rejected instead of being applied to the new state.
+ */
+data class DiscardRequest(val player: String, val cards: List<Card>, val version: Long)
 
-data class ActionRequest(val player: String, val type: ActionType, val amount: Int? = null)
+data class ActionRequest(val player: String, val type: ActionType, val amount: Int? = null, val version: Long)
+
+/** [suit] is kept as text so that an invalid suit gets a clear rule message. */
+data class TrumpRequest(val player: String, val suit: String, val version: Long)
 
 data class RoemRequest(val trump: Suit, val cards: List<Card>)
 
@@ -91,11 +98,20 @@ data class RoemCombinationTypeView(val type: RoemCombinationType, val label: Str
 
 data class RoemCombinationView(val type: RoemCombinationType, val label: String, val value: Int, val cards: List<Card>)
 
-data class RoemResultView(val combinations: List<RoemCombinationView>, val uncappedTotal: Int, val total: Int) {
+data class RoemAlternativeView(val combinations: List<RoemCombinationView>, val uncappedTotal: Int, val total: Int)
+
+/** All valid ways to score the cards; [total] is the highest, which is the one that counts. */
+data class RoemResultView(val alternatives: List<RoemAlternativeView>, val possibleTotals: List<Int>, val total: Int) {
     companion object {
         fun of(result: RoemResult) = RoemResultView(
-            combinations = result.combinations.map { RoemCombinationView(it.type, it.type.label, it.value, it.cards) },
-            uncappedTotal = result.uncappedTotal,
+            alternatives = result.alternatives.map { alternative ->
+                RoemAlternativeView(
+                    alternative.combinations.map { RoemCombinationView(it.type, it.type.label, it.value, it.cards) },
+                    alternative.uncappedTotal,
+                    alternative.total,
+                )
+            },
+            possibleTotals = result.possibleTotals,
             total = result.total,
         )
     }

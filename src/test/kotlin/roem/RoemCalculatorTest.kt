@@ -1,6 +1,7 @@
 package roem
 
 import model.Card
+import model.Deck
 import model.Rank
 import model.Rank.ACE
 import model.Rank.EIGHT
@@ -21,6 +22,9 @@ import org.junit.jupiter.api.assertThrows
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.EnumSource
 import roem.RoemCombinationType.FIVE_OR_SIX_SEQUENCE
+import roem.RoemCombinationType.FOUR_ACES
+import roem.RoemCombinationType.FOUR_JACKS
+import roem.RoemCombinationType.FOUR_KINGS
 import roem.RoemCombinationType.FOUR_SEQUENCE
 import roem.RoemCombinationType.FOUR_SEQUENCE_WITH_STUK
 import roem.RoemCombinationType.STUK
@@ -31,7 +35,7 @@ class RoemCalculatorTest {
 
     private fun cards(suit: Suit, vararg ranks: Rank) = ranks.map { Card(it, suit) }
     private fun fourOf(rank: Rank) = Suit.entries.map { Card(rank, it) }
-    private fun types(result: RoemResult) = result.combinations.map { it.type }
+    private fun types(result: RoemResult) = result.combinations!!.map { it.type }
 
     @Test
     fun `three consecutive cards score 20`() {
@@ -100,7 +104,7 @@ class RoemCalculatorTest {
     @EnumSource(value = Rank::class, names = ["ACE", "KING", "QUEEN", "JACK", "TEN"])
     fun `four Aces, Kings, Queens, Jacks and Tens score 100`(rank: Rank) {
         val result = RoemCalculator.calculate(fourOf(rank), trump = HEARTS)
-        assertEquals(1, result.combinations.size)
+        assertEquals(1, result.combinations!!.size)
         assertEquals(100, result.total)
     }
 
@@ -133,11 +137,56 @@ class RoemCalculatorTest {
     }
 
     @Test
-    fun `combinations sharing cards are added together`() {
-        val result = RoemCalculator.calculate(cards(CLUBS, SEVEN, EIGHT, NINE) + cards(SPADES, SEVEN, EIGHT, NINE), HEARTS)
-        assertEquals(40, result.total)
-        val shared = RoemCalculator.calculate(cards(HEARTS, JACK, QUEEN) + fourOf(KING), trump = HEARTS)
-        assertEquals(140, shared.uncappedTotal)
+    fun `separate combinations are added together`() {
+        val result = RoemCalculator.calculate(cards(CLUBS, SEVEN, EIGHT, NINE) + fourOf(ACE), trump = HEARTS)
+        assertEquals(listOf(THREE_SEQUENCE, FOUR_ACES), types(result))
+        assertEquals(120, result.uncappedTotal)
+        assertEquals(100, result.total)
+    }
+
+    @Test
+    fun `a card cannot score in both a sequence and a four of a kind, and the highest alternative counts`() {
+        val result = RoemCalculator.calculate(fourOf(JACK) + cards(HEARTS, TEN, QUEEN), trump = CLUBS)
+        assertEquals(
+            setOf(listOf(FOUR_JACKS), listOf(THREE_SEQUENCE)),
+            result.alternatives.map { alternative -> alternative.combinations.map { it.type } }.toSet(),
+        )
+        assertEquals(listOf(20, 100), result.possibleTotals)
+        assertEquals(100, result.total)
+        assertEquals(listOf(FOUR_JACKS), types(result))
+    }
+
+    @Test
+    fun `stuk may share cards with a four of a kind`() {
+        val result = RoemCalculator.calculate(fourOf(KING) + Card(QUEEN, HEARTS), trump = HEARTS)
+        assertEquals(listOf(STUK, FOUR_KINGS), types(result))
+        assertEquals(120, result.uncappedTotal)
+        assertEquals(100, result.total)
+    }
+
+    @Test
+    fun `stuk shares cards while the sequence and four Kings compete`() {
+        val result = RoemCalculator.calculate(cards(HEARTS, JACK, QUEEN) + fourOf(KING), trump = HEARTS)
+        assertEquals(
+            setOf(listOf(STUK, FOUR_KINGS), listOf(THREE_SEQUENCE_WITH_STUK)),
+            result.alternatives.map { alternative -> alternative.combinations.map { it.type } }.toSet(),
+        )
+        assertEquals(listOf(40, 100), result.possibleTotals)
+        assertEquals(100, result.total)
+    }
+
+    @Test
+    fun `stuk is counted only once`() {
+        val result = RoemCalculator.calculate(fourOf(KING) + fourOf(QUEEN), trump = HEARTS)
+        assertEquals(1, result.combinations!!.count { it.type == STUK })
+        assertEquals(100, result.total)
+    }
+
+    @Test
+    fun `four of a kind not conflicting with anything is always scored`() {
+        val result = RoemCalculator.calculate(fourOf(ACE) + cards(CLUBS, SEVEN), trump = HEARTS)
+        assertEquals(1, result.alternatives.size)
+        assertEquals(listOf(FOUR_ACES), types(result))
     }
 
     @Test
@@ -158,7 +207,23 @@ class RoemCalculatorTest {
     }
 
     @Test
-    fun `achievable totals are capped sums of combination values`() {
-        assertEquals(setOf(20, 40, 50, 60, 70, 80, 90, 100), RoemCalculator.achievableTotals)
+    fun `achievable totals are exactly the roem some six card hand can hold`() {
+        // Suits are interchangeable, so fixing hearts as trumps covers every trump suit.
+        val deck = Deck.cards
+        val held = sortedSetOf<Int>()
+        val hand = arrayOfNulls<Card>(6)
+        fun choose(from: Int, depth: Int) {
+            if (depth == 6) {
+                held += RoemCalculator.calculate(hand.map { it!! }, trump = HEARTS).total
+                return
+            }
+            for (i in from..deck.size - (6 - depth)) {
+                hand[depth] = deck[i]
+                choose(i + 1, depth + 1)
+            }
+        }
+        choose(0, 0)
+        assertEquals(setOf(0, 20, 40, 50, 60, 70, 100), held)
+        assertEquals(held - 0, RoemCalculator.achievableTotals)
     }
 }
