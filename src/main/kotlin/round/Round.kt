@@ -104,8 +104,9 @@ class Round private constructor(
         const val MIN_PLAYERS = 3
         const val MAX_PLAYERS = 5
 
-        fun deal(players: List<String>, dealer: String, shuffler: Shuffler): Round =
-            deal(players, dealer, shuffler, dealNumber = 1, version = 1, redealReason = null)
+        /** [firstVersion] lets a new round continue numbering after the previous one, so versions never repeat. */
+        fun deal(players: List<String>, dealer: String, shuffler: Shuffler, firstVersion: Long = 1): Round =
+            deal(players, dealer, shuffler, dealNumber = 1, version = firstVersion, redealReason = null)
 
         private fun deal(
             players: List<String>,

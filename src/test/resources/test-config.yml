@@ -1,0 +1,13 @@
+appName: Bonakkie test
+
+frontend:
+  allowedOrigins:
+    - http://localhost:5173
+
+server:
+  applicationConnectors:
+    - type: http
+      port: 0
+  adminConnectors:
+    - type: http
+      port: 0

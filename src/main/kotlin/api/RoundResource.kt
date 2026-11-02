@@ -9,7 +9,11 @@ import jakarta.ws.rs.POST
 import jakarta.ws.rs.Path
 import jakarta.ws.rs.PathParam
 import jakarta.ws.rs.Produces
+import jakarta.ws.rs.core.Context
+import jakarta.ws.rs.core.EntityTag
 import jakarta.ws.rs.core.MediaType
+import jakarta.ws.rs.core.Request
+import jakarta.ws.rs.core.Response
 import model.Card
 import model.Shuffler
 import model.Suit
@@ -18,6 +22,7 @@ import round.Round
 /**
  * Holds the single in-memory round. Each transition replaces the immutable round in one synchronized step,
  * and only applies to the version the request was based on, so a repeated request cannot act twice.
+ * Versions keep counting up across new rounds, so a request from an earlier round never matches.
  */
 class RoundStore(private val shuffler: Shuffler = Shuffler.random()) {
     private var round: Round? = null
@@ -26,7 +31,8 @@ class RoundStore(private val shuffler: Shuffler = Shuffler.random()) {
     fun current(): Round = round ?: throw NotFoundException("No round has been started.")
 
     @Synchronized
-    fun start(players: List<String>, dealer: String): Round = Round.deal(players, dealer, shuffler).also { round = it }
+    fun start(players: List<String>, dealer: String): Round =
+        Round.deal(players, dealer, shuffler, firstVersion = (round?.version ?: 0) + 1).also { round = it }
 
     @Synchronized
     fun bid(version: Long, player: String, action: Action): Round = transition(version) { it.bid(player, action) }
@@ -46,14 +52,17 @@ class RoundStore(private val shuffler: Shuffler = Shuffler.random()) {
     }
 }
 
-@Path("/api/round")
+@Path("/round")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
 class RoundResource(private val store: RoundStore) {
 
-    /** Public state: no hidden card identities. */
+    /**
+     * Public state: no hidden card identities. Carries an ETag (the round version), so a polling client can send
+     * If-None-Match and get 304 Not Modified until something changes.
+     */
     @GET
-    fun get(): RoundView = RoundView.of(store.current())
+    fun get(@Context request: Request): Response = conditional(request, store.current()) { RoundView.of(it) }
 
     /** Deals a fresh round and starts bidding, replacing any existing round. */
     @POST
@@ -62,10 +71,10 @@ class RoundResource(private val store: RoundStore) {
     /** The given player's private view, including their own cards. */
     @GET
     @Path("/players/{player}")
-    fun player(@PathParam("player") player: String): PlayerView {
+    fun player(@PathParam("player") player: String, @Context request: Request): Response {
         val round = store.current()
         if (player !in round.players) throw NotFoundException("$player is not playing in this round.")
-        return PlayerView.of(round, player)
+        return conditional(request, round) { PlayerView.of(it, player) }
     }
 
     @POST
@@ -86,5 +95,12 @@ class RoundResource(private val store: RoundStore) {
         val suit = Suit.entries.find { it.name == request.suit }
             ?: throw RuleViolation("Trumps must be one of ${Suit.entries.joinToString(", ")}.")
         return PlayerView.of(store.selectTrump(request.version, request.player, suit), request.player)
+    }
+
+    /** Every change to a round increases its version, so the version identifies the state of any view of it. */
+    private fun conditional(request: Request, round: Round, view: (Round) -> Any): Response {
+        val tag = EntityTag(round.version.toString())
+        request.evaluatePreconditions(tag)?.let { return it.tag(tag).build() }
+        return Response.ok(view(round)).tag(tag).header("Cache-Control", "no-cache").build()
     }
 }

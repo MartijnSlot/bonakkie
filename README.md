@@ -102,6 +102,7 @@ any player's view.
 - `src/main/kotlin/auction`: the bidding auction
 - `src/main/kotlin/roem`: the roem calculator
 - `src/main/kotlin/api`: the HTTP resources
+- `src/main/kotlin/web`: serving the single page app, and CORS
 
 ## Running
 
@@ -112,13 +113,40 @@ Kotlin, Dropwizard, JDK 25. The server listens on http://localhost:6969:
 ./gradlew test
 ```
 
+## Single page app
+
+The backend is ready for a single page app (there is none yet). Both are configured in
+`config/config.yml` under `frontend`:
+
+- **`directory`:** a folder with the built app (`index.html` plus assets), served at `/`. Paths
+  that aren't files get `index.html`, so client-side routes like `/table/3` survive a page refresh.
+  A missing asset such as `/assets/x.js` is still a 404, and files outside the folder are never
+  served. Leave it empty to serve only the API.
+- **`allowedOrigins`:** browser origins allowed to call the API from elsewhere (CORS), such as a
+  dev server on `http://localhost:5173`. This isn't needed when the app is served by this server,
+  or when the dev server proxies `/api` to `http://localhost:6969`.
+
+The API is always under `/api`, so the app owns every other path.
+
+### Building a client
+
+- **Rendering a player's screen:** `GET /api/round/players/{name}` gives everything for one
+  player. `availableActions` lists exactly what they can do now: legal bids, how many cards to
+  discard, or which trump suits to choose from. The client doesn't need to know any rules.
+- **Polling for other players' moves:** every response for `GET /api/round` and
+  `GET /api/round/players/{name}` carries an `ETag` (the round version). Send it back as
+  `If-None-Match`, and the server answers `304 Not Modified` with no body until something changes.
+- **Sending moves:** include the `version` you last saw. If someone else moved first, you get `409`;
+  reload the state and try again.
+- **Errors** are always JSON: `{"code": ..., "message": "..."}`. The message is meant for players.
+
 ## API
 
 | Method | Path | Body |
 |---|---|---|
 | `POST` | `/api/round` | `{"players": [...], "dealer": "..."}`: deals a fresh round and starts bidding |
 | `GET` | `/api/round` | public state, including `version` and the auction's `legalActions` |
-| `GET` | `/api/round/players/{player}` | that player's private view |
+| `GET` | `/api/round/players/{player}` | that player's private view, including `availableActions` |
 | `POST` | `/api/round/bids` | `{"player": "...", "type": "BID_POINTS", "amount": 80, "version": 3}` |
 | `POST` | `/api/round/discards` | `{"player": "...", "cards": [{"rank": "SEVEN", "suit": "CLUBS"}, ...], "version": 7}` |
 | `POST` | `/api/round/trump` | `{"player": "...", "suit": "HEARTS", "version": 8}` |
@@ -126,7 +154,8 @@ Kotlin, Dropwizard, JDK 25. The server listens on http://localhost:6969:
 | `POST` | `/api/roem/calculate` | `{"trump": "HEARTS", "cards": [...]}`: every scoring alternative, and the highest total |
 
 - Every bid, discard and trump choice must include the `version` from the latest state.
-- A request with an older version gets `409`, for example a repeated submission after a redeal.
+- A request with an older version gets `409`, for example a repeated submission or a request
+  from an earlier round. Versions keep counting up across new rounds, so they never repeat.
 - A request that breaks a rule gets `400` with `{"code": 400, "message": "..."}`.
 - In both cases the round is left unchanged.
 - The round is kept in memory, so there is one round per server and it is lost on restart.

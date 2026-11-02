@@ -1,5 +1,15 @@
 appName: Bonakkie
 
+# The single page app. The API is always served under /api.
+frontend:
+  # Folder with the built app (index.html plus assets), served at /. Unknown non-API paths
+  # get index.html so client-side routes survive a refresh. Leave empty to serve only the API.
+  directory:
+  # Browser origins allowed to call the API from elsewhere, e.g. a dev server.
+  # Not needed when the app is served from this server or through a dev-server proxy.
+  allowedOrigins:
+    - http://localhost:5173
+
 server:
   applicationConnectors:
     - type: http

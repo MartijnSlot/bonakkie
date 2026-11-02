@@ -49,16 +49,16 @@ class RoundResourceTest {
     private fun get(path: String): Pair<Int, JsonNode> =
         resources.target(path).request().get().use { it.status to mapper.readTree(it.readEntity(String::class.java)) }
 
-    private fun version() = get("/api/round").second["version"].asLong()
+    private fun version() = get("/round").second["version"].asLong()
 
     private fun bid(player: String, type: String, amount: Int? = null, version: Long = version()) =
-        post("/api/round/bids", """{"player":"$player","type":"$type"${amount?.let { ""","amount":$it""" } ?: ""},"version":$version}""")
+        post("/round/bids", """{"player":"$player","type":"$type"${amount?.let { ""","amount":$it""" } ?: ""},"version":$version}""")
 
     private fun discard(player: String, vararg cards: Card) =
-        post("/api/round/discards", """{"player":"$player","cards":${mapper.writeValueAsString(cards)},"version":${version()}}""")
+        post("/round/discards", """{"player":"$player","cards":${mapper.writeValueAsString(cards)},"version":${version()}}""")
 
     private fun trump(player: String, suit: String) =
-        post("/api/round/trump", """{"player":"$player","suit":"$suit","version":${version()}}""")
+        post("/round/trump", """{"player":"$player","suit":"$suit","version":${version()}}""")
 
     /** Every card identity anywhere in a response. */
     private fun cardsIn(node: JsonNode): Set<Card> = when {
@@ -68,7 +68,7 @@ class RoundResourceTest {
         else -> emptySet()
     }
 
-    private fun start() = post("/api/round", """{"players":["Ann","Bob","Cas"],"dealer":"Cas"}""")
+    private fun start() = post("/round", """{"players":["Ann","Bob","Cas"],"dealer":"Cas"}""")
 
     @Test
     fun `public state during bidding only reveals the face up stok card`() {
@@ -84,10 +84,10 @@ class RoundResourceTest {
     @Test
     fun `a player sees only their own hand and the face up card`() {
         start()
-        val (_, view) = get("/api/round/players/Ann")
+        val (_, view) = get("/round/players/Ann")
         assertEquals(ann, cardsIn(view["hand"]))
         assertEquals(ann + faceUp, cardsIn(view))
-        assertEquals(404, get("/api/round/players/Eve").first)
+        assertEquals(404, get("/round/players/Eve").first)
     }
 
     @Test
@@ -97,8 +97,8 @@ class RoundResourceTest {
         val (_, round) = bid("Cas", "PASS")
         assertEquals("STOK_EXCHANGE", round["phase"].asText())
         assertEquals(setOf(faceUp), cardsIn(round))
-        assertEquals(ann + faceUp + faceDown, cardsIn(get("/api/round/players/Ann").second))
-        assertEquals(bob + faceUp, cardsIn(get("/api/round/players/Bob").second))
+        assertEquals(ann + faceUp + faceDown, cardsIn(get("/round/players/Ann").second))
+        assertEquals(bob + faceUp, cardsIn(get("/round/players/Bob").second))
     }
 
     @Test
@@ -108,8 +108,8 @@ class RoundResourceTest {
         val (_, afterDiscard) = discard("Ann", card(Rank.SEVEN, Suit.CLUBS), card(Rank.EIGHT, Suit.CLUBS))
         assertEquals("TRUMP_SELECTION", afterDiscard["round"]["phase"].asText())
         assertEquals("Ann", afterDiscard["round"]["trumpChooser"].asText())
-        assertTrue(afterDiscard["mayChooseTrumps"].asBoolean())
-        assertFalse(get("/api/round/players/Bob").second["mayChooseTrumps"].asBoolean())
+        assertEquals(Suit.entries.map { it.name }, afterDiscard["availableActions"]["trumpSuits"].map { it.asText() })
+        assertTrue(get("/round/players/Bob").second["availableActions"]["trumpSuits"].isEmpty)
 
         val (wrongStatus, wrongPlayer) = trump("Bob", "HEARTS")
         assertEquals(400, wrongStatus)
@@ -125,10 +125,10 @@ class RoundResourceTest {
         assertEquals(50, annView["finalRoem"]["roem"]["total"].asInt())
         assertEquals(10, annView["finalRoem"]["pointsRequirements"]["requiredTrickPoints"].asInt())
 
-        val (_, round) = get("/api/round")
+        val (_, round) = get("/round")
         assertEquals("HEARTS", round["trumpSuit"].asText())
         assertEquals(setOf(faceUp), cardsIn(round))
-        assertTrue(get("/api/round/players/Bob").second["finalRoem"].isNull)
+        assertTrue(get("/round/players/Bob").second["finalRoem"].isNull)
     }
 
     @Test
@@ -142,7 +142,7 @@ class RoundResourceTest {
         assertEquals(20, bobView["finalRoem"]["roem"]["total"].asInt())
         assertFalse(bobView["finalRoem"]["bonakCommitmentSatisfied"].asBoolean())
 
-        val (_, round) = get("/api/round")
+        val (_, round) = get("/round")
         assertEquals("INSUFFICIENT_BONAK_ROEM", round["failure"]["reason"].asText())
         assertEquals(50, round["failure"]["declaredRoem"].asInt())
         assertFalse(round.toString().contains("\"total\""))
@@ -154,7 +154,7 @@ class RoundResourceTest {
         bid("Ann", "BID_PRAAT"); bid("Bob", "BID_PRAAT"); bid("Cas", "PASS")
         val passed = listOf(card(Rank.SEVEN, Suit.CLUBS), faceDown)
         discard("Ann", *passed.toTypedArray())
-        val (_, bobView) = get("/api/round/players/Bob")
+        val (_, bobView) = get("/round/players/Bob")
         assertEquals(passed.toSet(), cardsIn(bobView["receivedFromStok"]))
         assertEquals(bob + passed + faceUp, cardsIn(bobView))
 
@@ -177,13 +177,13 @@ class RoundResourceTest {
         val (status, error) = bid("Cas", "PASS", version = lastVersion)
         assertEquals(409, status)
         assertTrue(error["message"].asText().contains("has changed"))
-        assertEquals(redealt, get("/api/round").second)
+        assertEquals(redealt, get("/round").second)
     }
 
     @Test
     fun `invalid actions return 400 and leave state unchanged`() {
         start()
-        val before = get("/api/round").second
+        val before = get("/round").second
         val (status, error) = bid("Bob", "PASS")
         assertEquals(400, status)
         assertTrue(error["message"].asText().contains("It is Ann's turn"))
@@ -191,13 +191,13 @@ class RoundResourceTest {
         assertEquals(400, discardStatus)
         assertTrue(discardError["message"].asText().contains("stok exchange"))
         assertEquals(400, trump("Ann", "HEARTS").first)
-        assertEquals(before, get("/api/round").second)
+        assertEquals(before, get("/round").second)
     }
 
     @Test
     fun `player counts outside three to five are rejected`() {
         listOf("""["A","B"]""", """["A","B","C","D","E","F"]""").forEach { players ->
-            val (status, error) = post("/api/round", """{"players":$players,"dealer":"A"}""")
+            val (status, error) = post("/round", """{"players":$players,"dealer":"A"}""")
             assertEquals(400, status)
             assertTrue(error["message"].asText().contains("3 to 5 players"))
         }
@@ -205,7 +205,7 @@ class RoundResourceTest {
 
     @Test
     fun `returns 404 before any round is started`() {
-        assertEquals(404, get("/api/round").first)
+        assertEquals(404, get("/round").first)
     }
 
     @Test
@@ -213,10 +213,48 @@ class RoundResourceTest {
         val json = """{"trump":"CLUBS","cards":[
             {"rank":"JACK","suit":"CLUBS"},{"rank":"JACK","suit":"DIAMONDS"},{"rank":"JACK","suit":"HEARTS"},
             {"rank":"JACK","suit":"SPADES"},{"rank":"TEN","suit":"HEARTS"},{"rank":"QUEEN","suit":"HEARTS"}]}"""
-        val (status, result) = post("/api/roem/calculate", json)
+        val (status, result) = post("/roem/calculate", json)
         assertEquals(200, status)
         assertEquals(100, result["total"].asInt())
         assertEquals(listOf(20, 100), result["possibleTotals"].map { it.asInt() })
         assertEquals(2, result["alternatives"].size())
+    }
+
+    @Test
+    fun `each player's view lists exactly what they can do now`() {
+        start()
+        val (_, ann) = get("/round/players/Ann")
+        assertTrue(ann["availableActions"]["bids"].map { it["type"].asText() }.containsAll(listOf("ROND", "PASS", "BID_PRAAT")))
+        assertTrue(get("/round/players/Bob").second["availableActions"]["bids"].isEmpty)
+
+        bid("Ann", "BID_POINTS", 60); bid("Bob", "PASS"); bid("Cas", "PASS")
+        assertEquals(2, get("/round/players/Ann").second["availableActions"]["discardCount"].asInt())
+        assertTrue(get("/round/players/Bob").second["availableActions"]["discardCount"].isNull)
+    }
+
+    @Test
+    fun `polling with the ETag returns 304 until the round changes`() {
+        start()
+        val first = resources.target("/round").request().get()
+        val tag = first.entityTag
+        assertEquals(version().toString(), tag.value)
+        val unchanged = resources.target("/round").request().header("If-None-Match", first.getHeaderString("ETag")).get()
+        assertEquals(304, unchanged.status)
+
+        bid("Ann", "PASS")
+        val changed = resources.target("/round").request().header("If-None-Match", first.getHeaderString("ETag")).get()
+        assertEquals(200, changed.status)
+        assertEquals(304, resources.target("/round/players/Ann").request()
+            .header("If-None-Match", changed.getHeaderString("ETag")).get().status)
+    }
+
+    @Test
+    fun `versions keep counting up across new rounds, so old requests never apply`() {
+        start()
+        bid("Ann", "PASS")
+        val oldVersion = version()
+        val (_, fresh) = start()
+        assertTrue(fresh["version"].asLong() > oldVersion)
+        assertEquals(409, bid("Bob", "PASS", version = oldVersion).first)
     }
 }

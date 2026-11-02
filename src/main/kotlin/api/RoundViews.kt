@@ -1,6 +1,7 @@
 package api
 
 import auction.BonakContract
+import auction.LegalAction
 import auction.PointsRequirements
 import model.Card
 import model.Suit
@@ -87,6 +88,28 @@ data class FinalRoemView(
     val pointsRequirements: PointsRequirements?,
 )
 
+/** What this player can do right now. Built from the same rules that accept the actions. */
+data class AvailableActionsView(
+    /** The legal bids, when it is this player's turn to bid. */
+    val bids: List<LegalAction>,
+    /** How many cards to discard, when this player must discard now. */
+    val discardCount: Int?,
+    /** The suits to choose from, when this player must choose trumps now. */
+    val trumpSuits: List<Suit>,
+) {
+    companion object {
+        fun of(round: Round, player: String) = AvailableActionsView(
+            bids = if (round.phase == RoundPhase.BIDDING && round.auction.currentPlayer == player) {
+                round.auction.legalActions()
+            } else {
+                emptyList()
+            },
+            discardCount = if (round.currentExchanger == player) Round.DISCARD_SIZE else null,
+            trumpSuits = if (round.trumpChooser == player) Suit.entries else emptyList(),
+        )
+    }
+}
+
 /** One player's view: the public round plus their own cards. Never contains another player's hidden cards. */
 data class PlayerView(
     val player: String,
@@ -94,8 +117,7 @@ data class PlayerView(
     val hand: List<Card>,
     val receivedFromStok: List<Card>?,
     val discarded: List<Card>?,
-    /** True only for the declarer who must choose trumps now. */
-    val mayChooseTrumps: Boolean,
+    val availableActions: AvailableActionsView,
     val finalRoem: FinalRoemView?,
 ) {
     companion object {
@@ -105,7 +127,7 @@ data class PlayerView(
             hand = round.hand(player),
             receivedFromStok = round.received[player],
             discarded = round.discards[player],
-            mayChooseTrumps = round.trumpChooser == player,
+            availableActions = AvailableActionsView.of(round, player),
             finalRoem = round.finalRoem?.takeIf { it.player == player }?.let { roem ->
                 FinalRoemView(
                     hand = roem.hand,

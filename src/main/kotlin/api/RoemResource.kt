@@ -10,7 +10,7 @@ import jakarta.ws.rs.core.MediaType
 import roem.RoemCalculator
 import roem.RoemCombinationType
 
-@Path("/api/roem")
+@Path("/roem")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
 class RoemResource {
