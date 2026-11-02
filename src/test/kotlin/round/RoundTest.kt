@@ -40,6 +40,7 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.CsvSource
+import play.UnconfirmedRule
 
 /**
  * Seating is clockwise A, B, C, D with D dealing, so A is dealt first and bids first.
@@ -505,14 +506,16 @@ class RoundTest {
     }
 
     @Test
-    fun `the round stops before trick play`() {
+    fun `with the confirmed rules a ready hand is blocked from play`() {
         val ready = deal().bids(points(50), PASS, PASS, PASS).discard("A", listOf(S7, S8)).selectTrump("A", HEARTS)
         assertEquals(RoundPhase.READY_TO_PLAY, ready.phase)
+        assertEquals(listOf(UnconfirmedRule.FIRST_LEADER, UnconfirmedRule.MOVE_LEGALITY), ready.playBlockedBy)
+        assertRejected("blocked until these rules are confirmed") { ready.playCard("B", card(KING, CLUBS)) }
         assertRejected("Bidding is not in progress") { ready.bid("B", PASS) }
         assertRejected("only allowed during the stok exchange") { ready.discard("A", ready.hand("A").take(2)) }
         assertRejected("after the stok exchange") { ready.selectTrump("A", CLUBS) }
         assertEquals(
-            listOf("BIDDING", "STOK_EXCHANGE", "TRUMP_SELECTION", "READY_TO_PLAY", "CONTRACT_FAILED"),
+            listOf("BIDDING", "STOK_EXCHANGE", "TRUMP_SELECTION", "READY_TO_PLAY", "PLAYING", "HAND_COMPLETE", "CONTRACT_FAILED"),
             RoundPhase.entries.map { it.name },
         )
     }

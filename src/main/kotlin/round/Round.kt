@@ -13,8 +13,16 @@ import model.Card
 import model.Deck
 import model.Shuffler
 import model.Suit
+import play.CompletedTrick
+import play.FirstLeaderContext
+import play.Play
+import play.PlayRules
+import play.PlayState
+import play.UnconfirmedRule
+import play.trickWinner
 import roem.RoemCalculator
 import roem.RoemResult
+import java.util.UUID
 
 /** Where a card currently is. Every card of the deck has exactly one location. */
 sealed interface CardLocation
@@ -31,11 +39,24 @@ data object Unused : CardLocation
 /** The final two discards of the stok exchange; out of the current hand. */
 data object Discarded : CardLocation
 
+/** Played into trick [trick] (the trick in progress or a completed one). */
+data class Played(val trick: Int) : CardLocation
+
+/** How trumps stand. Null on a round means trumps are not determined yet (e.g. pending trump selection). */
+sealed interface TrumpMode
+
+data class Trumps(val suit: Suit) : TrumpMode
+
+/** Explicitly without trumps: Praat with several players. */
+data object NoTrumps : TrumpMode
+
 enum class RoundPhase(val message: String) {
     BIDDING("Cards are dealt; bidding is in progress."),
     STOK_EXCHANGE("The declarer takes the stok and discards two cards."),
     TRUMP_SELECTION("The declarer chooses trumps."),
     READY_TO_PLAY("Ready to play."),
+    PLAYING("The hand is being played."),
+    HAND_COMPLETE("All six tricks have been played."),
     CONTRACT_FAILED("The contract failed before play."),
 }
 
@@ -48,15 +69,17 @@ data class ContractFailure(val reason: FailureReason, val declaredRoem: Int, val
 data class FinalRoem(val player: String, val hand: List<Card>, val trump: Suit, val roem: RoemResult)
 
 /**
- * One deal of Bonak: dealing, bidding, the mandatory stok exchange, trump selection and final roem,
- * up to "ready to play". Immutable: every transition returns a new round or throws [RuleViolation],
- * leaving this one untouched.
+ * One hand of Bonak: dealing, bidding, the mandatory stok exchange, trump selection, final roem and play.
+ * Immutable: every transition returns a new round or throws [RuleViolation], leaving this one untouched.
  */
 class Round private constructor(
+    /** Identifies this hand (and its contract, of which there is one per hand). A redeal is a new hand. */
+    val handId: String,
     val dealNumber: Int,
     /** Increases with every accepted transition, so clients can make their requests conditional on the state they saw. */
     val version: Long,
     private val shuffler: Shuffler,
+    private val rules: PlayRules,
     val locations: Map<Card, CardLocation>,
     /** The stok card dealt face up. Everyone saw it during bidding, so it stays public knowledge. */
     val originalFaceUpCard: Card,
@@ -76,6 +99,7 @@ class Round private constructor(
     /** Only for the declarer of a points or Bonak-with-roem contract. Other players' roem is never calculated. */
     val finalRoem: FinalRoem?,
     val failure: ContractFailure?,
+    val play: PlayState?,
     /** Why this deal replaced the previous one, if it did. */
     val redealReason: String?,
 ) {
@@ -93,6 +117,26 @@ class Round private constructor(
     val playsWithoutTrumps: Boolean
         get() = (auction.contract as? PraatContract)?.let { it.declarers.size > 1 } ?: false
 
+    val trumpMode: TrumpMode?
+        get() = when {
+            trump != null -> Trumps(trump)
+            playsWithoutTrumps -> NoTrumps
+            else -> null
+        }
+
+    /** Rules that must be confirmed before this hand can be played. Only reported once the hand is ready. */
+    val playBlockedBy: List<UnconfirmedRule>
+        get() = if (phase == RoundPhase.READY_TO_PLAY) rules.unconfirmed else emptyList()
+
+    /** Whose turn it is to play a card. */
+    val currentPlayer: String?
+        get() = play?.takeIf { phase == RoundPhase.PLAYING }?.let { state ->
+            players[(players.indexOf(state.leader) + state.currentTrick.size) % players.size]
+        }
+
+    val tricksWon: Map<String, Int>
+        get() = players.associateWith { player -> play?.completedTricks?.count { it.winner == player } ?: 0 }
+
     init {
         check(locations.keys == Deck.cards.toSet()) { "Every card must have exactly one location." }
     }
@@ -103,15 +147,25 @@ class Round private constructor(
         const val DISCARD_SIZE = 2
         const val MIN_PLAYERS = 3
         const val MAX_PLAYERS = 5
+        const val TRICKS_PER_HAND = HAND_SIZE
 
-        /** [firstVersion] lets a new round continue numbering after the previous one, so versions never repeat. */
-        fun deal(players: List<String>, dealer: String, shuffler: Shuffler, firstVersion: Long = 1): Round =
-            deal(players, dealer, shuffler, dealNumber = 1, version = firstVersion, redealReason = null)
+        /**
+         * [firstVersion] lets a new round continue numbering after the previous one, so versions never repeat.
+         * [rules] are the play rules; with unconfirmed ones the hand stops at "ready to play".
+         */
+        fun deal(
+            players: List<String>,
+            dealer: String,
+            shuffler: Shuffler,
+            firstVersion: Long = 1,
+            rules: PlayRules = PlayRules.CONFIRMED,
+        ): Round = deal(players, dealer, shuffler, rules, dealNumber = 1, version = firstVersion, redealReason = null)
 
         private fun deal(
             players: List<String>,
             dealer: String,
             shuffler: Shuffler,
+            rules: PlayRules,
             dealNumber: Int,
             version: Long,
             redealReason: String?,
@@ -137,9 +191,11 @@ class Round private constructor(
             deck.drop(stokStart + STOK_SIZE).forEach { locations[it] = Unused }
 
             return Round(
+                handId = UUID.randomUUID().toString(),
                 dealNumber = dealNumber,
                 version = version,
                 shuffler = shuffler,
+                rules = rules,
                 locations = locations,
                 originalFaceUpCard = deck[stokStart],
                 originalFaceDownCard = deck[stokStart + 1],
@@ -152,6 +208,7 @@ class Round private constructor(
                 trump = null,
                 finalRoem = null,
                 failure = null,
+                play = null,
                 redealReason = redealReason,
             )
         }
@@ -212,7 +269,7 @@ class Round private constructor(
             exchangesCompleted = exchangesCompleted + 1,
             received = if (next != null) received + (next to cards) else received,
             discards = discards + (player to cards),
-        )
+        ).startPlayIfReady()
     }
 
     fun selectTrump(player: String, suit: Suit): Round {
@@ -226,7 +283,7 @@ class Round private constructor(
         if (player != declarer) throw RuleViolation("Only $declarer may choose trumps.")
 
         val contract = auction.contract!!
-        if (!roemCounts(contract)) return copy(trump = suit, phase = RoundPhase.READY_TO_PLAY)
+        if (!roemCounts(contract)) return copy(trump = suit, phase = RoundPhase.READY_TO_PLAY).startPlayIfReady()
 
         val roem = FinalRoem(declarer, hand(declarer), suit, RoemCalculator.calculate(hand(declarer), suit))
         val committed = (contract as? BonakContract)?.declaredRoem
@@ -242,7 +299,7 @@ class Round private constructor(
                 ),
             )
         } else {
-            copy(trump = suit, finalRoem = roem, phase = RoundPhase.READY_TO_PLAY)
+            copy(trump = suit, finalRoem = roem, phase = RoundPhase.READY_TO_PLAY).startPlayIfReady()
         }
     }
 
@@ -260,13 +317,73 @@ class Round private constructor(
         return roem.roem.total >= committed
     }
 
+    /** The cards [player] may play now, according to the legality policy that also validates plays. */
+    fun legalCards(player: String): Set<Card> {
+        if (phase != RoundPhase.PLAYING || player != currentPlayer) return emptySet()
+        val hand = hand(player)
+        return rules.legality!!.legalCards(hand, play!!.currentTrick, trump).intersect(hand.toSet())
+    }
+
+    fun playCard(player: String, card: Card): Round {
+        if (phase != RoundPhase.PLAYING) {
+            throw RuleViolation(
+                when {
+                    playBlockedBy.isNotEmpty() ->
+                        "Card play is blocked until these rules are confirmed: " +
+                            playBlockedBy.joinToString(" ") { it.description }
+                    phase == RoundPhase.HAND_COMPLETE -> "The hand is complete; no more cards can be played."
+                    phase == RoundPhase.CONTRACT_FAILED -> "The contract failed before play; this hand is not played."
+                    else -> "Cards can only be played once the hand is being played."
+                }
+            )
+        }
+        val state = play!!
+        val turn = currentPlayer!!
+        if (player != turn) throw RuleViolation("It is $turn's turn to play, not $player's.")
+        if (locations[card] != InHand(player)) throw RuleViolation("You can only play a card from your own hand.")
+        if (card !in legalCards(player)) throw RuleViolation("That card may not be played now.")
+
+        // Taking the card from the hand and adding it to the trick is one transition.
+        val newLocations = locations + (card to Played(state.trickNumber))
+        val trick = state.currentTrick + Play(player, card)
+        if (trick.size < players.size) return copy(locations = newLocations, play = state.copy(currentTrick = trick))
+
+        val completed = state.completedTricks +
+            CompletedTrick(state.trickNumber, state.leader, trick, trickWinner(trick, trump).player)
+        return if (completed.size == TRICKS_PER_HAND) {
+            // The hand ends here: no next deal and no dealer change.
+            copy(
+                locations = newLocations,
+                phase = RoundPhase.HAND_COMPLETE,
+                play = state.copy(currentTrick = emptyList(), completedTricks = completed),
+            )
+        } else {
+            copy(
+                locations = newLocations,
+                play = PlayState(state.trickNumber + 1, completed.last().winner, emptyList(), completed),
+            )
+        }
+    }
+
+    /** Starts play once the hand is ready, if the rules needed to play it are confirmed; otherwise stays ready. */
+    private fun startPlayIfReady(): Round {
+        if (phase != RoundPhase.READY_TO_PLAY) return this
+        check(players.all { hand(it).size == HAND_SIZE }) { "Every player must hold $HAND_SIZE cards to start play." }
+        check(trumpMode != null && failure == null)
+        val leaderPolicy = rules.firstLeader
+        if (leaderPolicy == null || rules.legality == null) return this
+        val leader = leaderPolicy.firstLeader(FirstLeaderContext(players, dealer, auction.contract!!))
+        check(leader in players) { "The first leader must be one of the players." }
+        return copy(phase = RoundPhase.PLAYING, play = PlayState(1, leader, emptyList(), emptyList()))
+    }
+
     /** Roem matters only for points contracts and Bonak with roem; never for Praat or plain Bonak. */
     private fun roemCounts(contract: Contract) =
         contract is PointsContract || (contract is BonakContract && contract.declaredRoem != null)
 
     /** Starts a fresh deal: hands, stok, discards and the auction are all replaced. */
     private fun redeal(newDealer: String, reason: String) =
-        deal(players, newDealer, shuffler, dealNumber + 1, version + 1, reason)
+        deal(players, newDealer, shuffler, rules, dealNumber + 1, version + 1, reason)
 
     private fun copy(
         locations: Map<Card, CardLocation> = this.locations,
@@ -279,8 +396,9 @@ class Round private constructor(
         trump: Suit? = this.trump,
         finalRoem: FinalRoem? = this.finalRoem,
         failure: ContractFailure? = this.failure,
+        play: PlayState? = this.play,
     ) = Round(
-        dealNumber, version + 1, shuffler, locations, originalFaceUpCard, originalFaceDownCard, auction, phase,
-        exchangeOrder, exchangesCompleted, received, discards, trump, finalRoem, failure, redealReason,
+        handId, dealNumber, version + 1, shuffler, rules, locations, originalFaceUpCard, originalFaceDownCard, auction,
+        phase, exchangeOrder, exchangesCompleted, received, discards, trump, finalRoem, failure, play, redealReason,
     )
 }

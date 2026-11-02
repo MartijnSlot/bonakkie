@@ -36,8 +36,10 @@ tasks {
         useJUnitPlatform()
     }
 
-    withType<JavaExec> {
-            args("server", configYML)
+    named<JavaExec>("run") {
+        // `./gradlew run` starts the server; `./gradlew run --args=game` replaces these arguments with the text game.
+        args("server", configYML)
+        standardInput = System.`in`
     }
 
     wrapper {

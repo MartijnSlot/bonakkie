@@ -17,6 +17,7 @@ import jakarta.ws.rs.core.Response
 import model.Card
 import model.Shuffler
 import model.Suit
+import play.PlayRules
 import round.Round
 
 /**
@@ -24,7 +25,7 @@ import round.Round
  * and only applies to the version the request was based on, so a repeated request cannot act twice.
  * Versions keep counting up across new rounds, so a request from an earlier round never matches.
  */
-class RoundStore(private val shuffler: Shuffler = Shuffler.random()) {
+class RoundStore(private val shuffler: Shuffler = Shuffler.random(), private val rules: PlayRules = PlayRules.CONFIRMED) {
     private var round: Round? = null
 
     @Synchronized
@@ -32,13 +33,16 @@ class RoundStore(private val shuffler: Shuffler = Shuffler.random()) {
 
     @Synchronized
     fun start(players: List<String>, dealer: String): Round =
-        Round.deal(players, dealer, shuffler, firstVersion = (round?.version ?: 0) + 1).also { round = it }
+        Round.deal(players, dealer, shuffler, firstVersion = (round?.version ?: 0) + 1, rules = rules).also { round = it }
 
     @Synchronized
     fun bid(version: Long, player: String, action: Action): Round = transition(version) { it.bid(player, action) }
 
     @Synchronized
     fun discard(version: Long, player: String, cards: List<Card>): Round = transition(version) { it.discard(player, cards) }
+
+    @Synchronized
+    fun playCard(version: Long, player: String, card: Card): Round = transition(version) { it.playCard(player, card) }
 
     @Synchronized
     fun selectTrump(version: Long, player: String, suit: Suit): Round = transition(version) { it.selectTrump(player, suit) }
@@ -87,6 +91,12 @@ class RoundResource(private val store: RoundStore) {
     @Path("/discards")
     fun discard(request: DiscardRequest): PlayerView =
         PlayerView.of(store.discard(request.version, request.player, request.cards), request.player)
+
+    /** Returns the player's private view, since it contains their remaining hand. */
+    @POST
+    @Path("/plays")
+    fun play(request: PlayRequest): PlayerView =
+        PlayerView.of(store.playCard(request.version, request.player, request.card), request.player)
 
     /** Returns the declarer's private view, since it contains their final roem. */
     @POST

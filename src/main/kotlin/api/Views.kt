@@ -27,6 +27,8 @@ data class DiscardRequest(val player: String, val cards: List<Card>, val version
 
 data class ActionRequest(val player: String, val type: ActionType, val amount: Int? = null, val version: Long)
 
+data class PlayRequest(val player: String, val card: Card, val version: Long)
+
 /** [suit] is kept as text so that an invalid suit gets a clear rule message. */
 data class TrumpRequest(val player: String, val suit: String, val version: Long)
 
@@ -96,17 +98,20 @@ data class AuctionView(
 
 data class RoemCombinationTypeView(val type: RoemCombinationType, val label: String, val value: Int)
 
-data class RoemCombinationView(val type: RoemCombinationType, val label: String, val value: Int, val cards: List<Card>)
+/** [cards] is null when the cards may no longer be shown (once play has started). */
+data class RoemCombinationView(val type: RoemCombinationType, val label: String, val value: Int, val cards: List<Card>?)
 
 data class RoemAlternativeView(val combinations: List<RoemCombinationView>, val uncappedTotal: Int, val total: Int)
 
 /** All valid ways to score the cards; [total] is the highest, which is the one that counts. */
 data class RoemResultView(val alternatives: List<RoemAlternativeView>, val possibleTotals: List<Int>, val total: Int) {
     companion object {
-        fun of(result: RoemResult) = RoemResultView(
+        fun of(result: RoemResult, showCards: Boolean = true) = RoemResultView(
             alternatives = result.alternatives.map { alternative ->
                 RoemAlternativeView(
-                    alternative.combinations.map { RoemCombinationView(it.type, it.type.label, it.value, it.cards) },
+                    alternative.combinations.map {
+                        RoemCombinationView(it.type, it.type.label, it.value, it.cards.takeIf { showCards })
+                    },
                     alternative.uncappedTotal,
                     alternative.total,
                 )

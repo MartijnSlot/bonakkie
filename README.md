@@ -2,10 +2,12 @@
 
 A backend for one deal of the Twents card game Bonak, served over an HTTP API. It covers:
 
-    Dealing → Bidding → Stok exchange → Trump selection → Final roem → Ready to play
+    Dealing → Bidding → Stok exchange → Trump selection → Final roem → Play → Hand complete
 
-It stops at "Ready to play" (or at an immediate contract failure). Trick play and scoring hands are
-not implemented, and there is no frontend yet.
+The play engine is built, but play is **blocked** until the rules listed under
+[Rules not confirmed yet](#rules-not-confirmed-yet) are decided. With today's rules a hand stops
+at "Ready to play" and says which rules are missing. Scoring hands is not implemented, and there is
+no frontend yet.
 
 ## Phases
 
@@ -36,7 +38,36 @@ not implemented, and there is no frontend yet.
      to play. If it is equal or higher, the commitment is met and the bid stays as declared. No
      penalty or score change is recorded beyond the failure.
    - **Plain Bonak and Praat:** roem isn't calculated.
-6. **Ready to play.** Every player holds 6 cards. No more actions are accepted.
+6. **Ready to play.** Every player holds 6 cards. Play starts immediately if the first-leader and
+   card-legality rules are known; otherwise the hand stays here and `playBlockedBy` names the
+   missing rules.
+7. **Play.** Six tricks. Every player plays in every trick, including players who passed in
+   bidding. Turns go clockwise from the trick's leader, one card per player. When everyone has
+   played, the trick's winner is recorded and leads the next trick. Play never stops early, even
+   when the contract's outcome is already certain.
+8. **Hand complete.** After the sixth trick every hand is empty and no more cards are accepted.
+   There is no automatic next deal and the dealer doesn't change.
+
+A failed Bonak-with-roem commitment ends the hand before play.
+
+## Play rules
+
+Trumps: the declarer's chosen suit for points contracts, Bonak (with or without roem) and a single
+Praat player. Praat with several players is played without trumps (`trumpStatus` `NO_TRUMPS`, which
+is different from `NOT_CHOSEN` before trump selection).
+
+Card strength during play, lowest to highest:
+
+| | |
+|---|---|
+| Trump suit | 7, 8, 10, Queen, King, Ace, 9 (the Nel), Jack |
+| Other suits, and every suit without trumps | 7, 8, 9, 10, Jack, Queen, King, Ace |
+
+- **Who wins a trick:** any trump beats any non-trump, and the highest trump wins. Without a
+  trump, the highest card of the suit led wins. A card of another suit never wins, and suits are
+  never ranked against each other.
+- **Play ranking is separate from roem and points.** It has nothing to do with roem sequences
+  (still 7 to Ace) or card point values.
 
 ## Bidding rules
 
@@ -74,24 +105,52 @@ not implemented, and there is no frontend yet.
   gives either four Jacks (100) or 10-J-Q of hearts (20). The highest total counts. The calculator
   still lists every alternative.
 
-## Not built yet
+## Rules not confirmed yet
 
-- **Checking roem.** Only the declarer sees their final roem. Other players will check it during
-  the play phase, which isn't built yet.
+These are not decided, so the code doesn't guess. The first two block play. Each one sits behind
+an interface in `src/main/kotlin/play/PlayRules.kt`, and `PlayRules.CONFIRMED` (what the server
+uses) leaves both empty:
+
+- **Who leads the first trick** (`FirstLeaderPolicy`), including with several Praat players.
+- **Which cards may be played** (`PlayLegalityPolicy`):
+  - whether following suit is mandatory;
+  - whether a player may trump while holding the suit led;
+  - whether trumping is mandatory when unable to follow;
+  - whether overtrumping is mandatory, and whether undertrumping is allowed;
+  - whether the trump Jack may be withheld when trumps are led.
+
+  Once these are confirmed, the same policy validates plays and produces each player's
+  `playableCards`.
+- **Card point values:** no points are counted per trick yet.
+- **Scoring a completed hand**, and **what happens after it** (next deal, dealer).
+- **Checking the declarer's roem:** only the declarer sees their final roem, and how others check
+  it isn't defined yet.
+
+The contract targets are kept for later scoring: points contracts need their trick points after
+roem and at least one trick; Bonak needs all six tricks; Praat needs no tricks for each declarer.
 
 ## Visibility
 
 The server decides what each response contains:
 
-- **Public state** (`GET /api/round`): phase, turn, bidding, exchange progress, who must choose
-  trumps, the chosen trumps, hand sizes, counts of stok, unused and discarded cards, and any
-  contract failure with its reason and declared roem. The only card it names is the original
+- **Public state** (`GET /api/round`): `handId`, phase, turn, bidding, exchange progress, who must
+  choose trumps, the trump status, hand sizes, counts of stok, unused and discarded cards, any
+  contract failure with its reason and declared roem, and the play: trick number, leader, whose
+  turn it is, the cards in the current trick, completed tricks with their winners, and tricks won
+  per player. The only card it names is the original
   face-up stok card, which everyone saw during bidding. It never says where that card ended up.
 - **A player's view** (`GET /api/round/players/{name}`): the public state plus that player's own
-  hand, the cards they received in the exchange, their own discards, whether they may choose
-  trumps now, and their final roem if they are the declarer.
+  hand, the cards they received in the exchange, their own discards, what they can do now
+  (`availableActions`: bids, discards, trump suits, playable cards), and their final roem if they
+  are the declarer.
 - The face-down stok card, other players' hands, unused cards, discards and the declarer's actual
   roem are never sent to anyone else.
+- **Looking back during play:** only the last completed trick may be looked back at. Responses
+  show the cards of the current trick and of the last completed trick. Earlier tricks only show
+  their number, leader and winner, to everyone. Once play starts, a player's own view also stops
+  naming cards that may have been played since: the stok cards they received, and the hand and
+  cards behind their final roem. The roem total, combination types and trick requirements stay
+  visible, and so do their discards, which are out of play.
 
 There is no authentication yet (planned for later), so anyone who can reach the API can request
 any player's view.
@@ -102,7 +161,9 @@ any player's view.
 - `src/main/kotlin/auction`: the bidding auction
 - `src/main/kotlin/roem`: the roem calculator
 - `src/main/kotlin/api`: the HTTP resources
+- `src/main/kotlin/play`: card ranking, trick winners, and the play-rule interfaces
 - `src/main/kotlin/web`: serving the single page app, and CORS
+- `src/main/kotlin/cli`: the text game
 
 ## Running
 
@@ -112,6 +173,30 @@ Kotlin, Dropwizard, JDK 25. The server listens on http://localhost:6969:
 ./gradlew run
 ./gradlew test
 ```
+
+## Text game
+
+A terminal version of dealing and bidding, for trying the rules out at one keyboard:
+
+```
+./gradlew -q --console=plain run --args=game
+```
+
+It deals for Ann, Bob and Cas with Cas dealing, and shows every hand plus the face-up stok card.
+Then it asks each player in turn for a bid, listing the options that are legal right now:
+
+| Input | Bid |
+|---|---|
+| `60` | 60 points (50-125, steps of 5) |
+| `praat` | Praat, or join an existing Praat |
+| `bonak` | Bonak |
+| `bonak 40` | Bonak with 40 roem (after an earlier Bonak) |
+| `pass` / `rond` | pass / rond |
+| `hands`, `help`, `quit` | show the hands again, list the inputs, stop |
+
+All-Rond and all-pass redeal as usual. The game stops once the bidding has a contract; the stok
+exchange and later phases aren't in the text game yet. `-q --console=plain` keeps Gradle's progress
+output out of the game.
 
 ## Single page app
 
@@ -132,7 +217,9 @@ The API is always under `/api`, so the app owns every other path.
 
 - **Rendering a player's screen:** `GET /api/round/players/{name}` gives everything for one
   player. `availableActions` lists exactly what they can do now: legal bids, how many cards to
-  discard, or which trump suits to choose from. The client doesn't need to know any rules.
+  discard, which trump suits to choose from, or which cards they may play. Only enable those
+  controls; the client doesn't need to know any rules. When `round.playBlockedBy` is not empty,
+  show its descriptions to explain why nobody can play yet.
 - **Polling for other players' moves:** every response for `GET /api/round` and
   `GET /api/round/players/{name}` carries an `ETag` (the round version). Send it back as
   `If-None-Match`, and the server answers `304 Not Modified` with no body until something changes.
@@ -150,6 +237,7 @@ The API is always under `/api`, so the app owns every other path.
 | `POST` | `/api/round/bids` | `{"player": "...", "type": "BID_POINTS", "amount": 80, "version": 3}` |
 | `POST` | `/api/round/discards` | `{"player": "...", "cards": [{"rank": "SEVEN", "suit": "CLUBS"}, ...], "version": 7}` |
 | `POST` | `/api/round/trump` | `{"player": "...", "suit": "HEARTS", "version": 8}` |
+| `POST` | `/api/round/plays` | `{"player": "...", "card": {"rank": "JACK", "suit": "HEARTS"}, "version": 9}` |
 | `GET` | `/api/roem/combinations` | roem table |
 | `POST` | `/api/roem/calculate` | `{"trump": "HEARTS", "cards": [...]}`: every scoring alternative, and the highest total |
 

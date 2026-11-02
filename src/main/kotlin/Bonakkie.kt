@@ -3,6 +3,7 @@ import api.RoundResource
 import api.RoundStore
 import api.RuleViolationMapper
 import api.StaleRequestMapper
+import cli.TextGame
 import com.fasterxml.jackson.module.kotlin.kotlinModule
 import io.dropwizard.core.Application
 import io.dropwizard.core.setup.Bootstrap
@@ -46,9 +47,14 @@ internal class Bonakkie : Application<BonakkieConfiguration>() {
     }
 
     companion object {
+        /** `game` starts the text game in the terminal; anything else is passed to Dropwizard (e.g. `server config.yml`). */
         @JvmStatic
         fun main(args: Array<String>) {
-            Bonakkie().run(*args)
+            if (args.firstOrNull() == "game") {
+                TextGame(System.`in`.bufferedReader(), System.out).run()
+            } else {
+                Bonakkie().run(*args)
+            }
         }
     }
 }
